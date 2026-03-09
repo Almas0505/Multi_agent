@@ -48,7 +48,6 @@ def _make_mock_ticker(info: dict | None = None, financials=None, balance_sheet=N
     }
 
     # Build a minimal DataFrame for financials
-    import pandas as pd
     if financials is None:
         financials = pd.DataFrame(
             {

@@ -117,7 +117,12 @@ class ReportAgent(BaseAgent):
     ) -> float:
         """Weighted composite score 0-100.
 
-        Fundamentals: 30%, Technical: 25%, Sentiment: 20%, Risk: 15%, Competitor: 10%.
+        Weights reflect relative importance of each analysis dimension:
+        - Fundamentals (30%): primary driver of intrinsic value
+        - Technical (25%): short-to-medium term price momentum
+        - Sentiment (20%): market perception and news flow
+        - Risk (15%): risk-adjusted return consideration
+        - Competitor (10%): relative competitive positioning
         BUY=100, HOLD=50, SELL=0 for each component.
         """
         rating_to_score = {"BUY": 100.0, "HOLD": 50.0, "SELL": 0.0}

@@ -47,6 +47,9 @@ class RiskAgent(BaseAgent):
             reg_risks = self._extract_regulatory_risks(news)
 
             # Determine risk level based on beta and VaR thresholds
+            # LOW: stable stocks with beta < 0.8 (below-market vol) and VaR > -2% (small daily loss)
+            # HIGH: volatile stocks with beta > 1.5 or VaR < -4% (large potential daily loss)
+            # MEDIUM: all other stocks
             if beta < 0.8 and var_95 > -0.02:
                 risk_level = "LOW"
             elif beta > 1.5 or var_95 < -0.04:

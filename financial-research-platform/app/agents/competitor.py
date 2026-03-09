@@ -56,7 +56,8 @@ class CompetitorAgent(BaseAgent):
                 fallback=self._mock_analysis_text(ticker, [p["ticker"] for p in peers]),
             )
 
-            # Determine rating based on vs_peers rankings
+            # Rating based on vs_peers rankings (1-best to N-worst among subject+peers)
+            # avg_rank <= 2: top-2 in most categories → BUY; >= 4: bottom → SELL; else HOLD
             avg_rank = (
                 (vs_peers.get("pe_percentile", 3) +
                  vs_peers.get("margin_rank", 3) +

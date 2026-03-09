@@ -53,8 +53,8 @@ class SECEdgarTool:
             company_name = ticker
             last_10k_date = "N/A"
             last_10k_accession = "N/A"
-            last_rev: int | str = "N/A"
-            last_ni: int | str = "N/A"
+            last_rev: int | None = None
+            last_ni: int | None = None
 
             facts = self.get_company_facts(ticker)
             if facts and "facts" in facts:
@@ -68,14 +68,14 @@ class SECEdgarTool:
 
                 if annual_revenue:
                     last_entry = annual_revenue[-1]
-                    last_rev = last_entry.get("val", "N/A")
+                    last_rev = last_entry.get("val") or None
                     last_10k_date = last_entry.get("end", "N/A")
                     last_10k_accession = last_entry.get("accn", "N/A")
                 if annual_net_income:
-                    last_ni = annual_net_income[-1].get("val", "N/A")
+                    last_ni = annual_net_income[-1].get("val") or None
 
-            rev_str = f"${last_rev:,}" if isinstance(last_rev, int) else str(last_rev)
-            ni_str = f"${last_ni:,}" if isinstance(last_ni, int) else str(last_ni)
+            rev_str = f"${last_rev:,}" if last_rev is not None else "N/A"
+            ni_str = f"${last_ni:,}" if last_ni is not None else "N/A"
             summary_text = (
                 f"SEC EDGAR Summary for {ticker}: "
                 f"Most recent annual revenue: {rev_str}, "

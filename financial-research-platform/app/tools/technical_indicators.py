@@ -289,13 +289,23 @@ class TechnicalIndicatorsTool:
             bb_lower = indicators_data.get("bb_lower")
             bb_middle = indicators_data.get("bb_middle")
 
+            # Bollinger Band values from compute_all are scalars (last-bar values).
+            # Represent them as horizontal reference lines rather than full arrays.
             if bb_upper is not None and bb_lower is not None:
-                bb_u = [bb_upper] * len(closes) if isinstance(bb_upper, (int, float)) else list(bb_upper)
-                bb_l = [bb_lower] * len(closes) if isinstance(bb_lower, (int, float)) else list(bb_lower)
-                ax1.fill_between(x, bb_l, bb_u, alpha=0.15, color="orange", label="BB Band")
+                if isinstance(bb_upper, (int, float)) and isinstance(bb_lower, (int, float)):
+                    # Scalar: draw horizontal reference bands
+                    ax1.axhline(bb_upper, color="orange", linewidth=0.8, linestyle=":", label=f"BB Upper {bb_upper:.1f}")
+                    ax1.axhline(bb_lower, color="orange", linewidth=0.8, linestyle=":", label=f"BB Lower {bb_lower:.1f}")
+                    ax1.fill_between(x, [bb_lower] * len(closes), [bb_upper] * len(closes), alpha=0.08, color="orange")
+                else:
+                    bb_u = list(bb_upper)
+                    bb_l = list(bb_lower)
+                    ax1.fill_between(x, bb_l, bb_u, alpha=0.15, color="orange", label="BB Band")
             if bb_middle is not None:
-                bb_m = [bb_middle] * len(closes) if isinstance(bb_middle, (int, float)) else list(bb_middle)
-                ax1.plot(x, bb_m, color="orange", linewidth=0.8, linestyle="--", label="BB Middle")
+                if isinstance(bb_middle, (int, float)):
+                    ax1.axhline(bb_middle, color="orange", linewidth=0.8, linestyle="--", label=f"BB Middle {bb_middle:.1f}")
+                else:
+                    ax1.plot(x, list(bb_middle), color="orange", linewidth=0.8, linestyle="--", label="BB Middle")
 
             sma20 = indicators_data.get("sma20")
             sma50 = indicators_data.get("sma50")

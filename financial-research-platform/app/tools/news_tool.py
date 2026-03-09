@@ -53,6 +53,111 @@ class NewsTool:
             logger.warning(f"NewsTool.get_news failed for {ticker}: {exc}")
             return self._mock_news(ticker, company_name)
 
+    async def get_news_with_sentiment(self, ticker: str, llm=None) -> list[dict]:
+        """Return articles enriched with LLM-based sentiment scores.
+
+        Each article dict contains: title, source, published_at, url, sentiment_score.
+        If *llm* is provided, each headline is scored from -1.0 to +1.0.
+        Falls back to 0.0 on parse failure.
+        """
+        raw_articles = self.get_news(ticker, ticker)
+        results: list[dict] = []
+
+        for article in raw_articles:
+            title = article.get("title") or ""
+            score = 0.0
+            if llm and title:
+                try:
+                    from langchain_core.messages import HumanMessage  # type: ignore
+                    prompt = (
+                        "Rate the sentiment of this financial news headline from -1.0 "
+                        "(very negative) to +1.0 (very positive). Return only a number.\n"
+                        f"Headline: {title}"
+                    )
+                    response = await llm.ainvoke([HumanMessage(content=prompt)])
+                    text = response.content.strip()
+                    # Extract the first float-like token
+                    import re
+                    match = re.search(r"-?\d+(?:\.\d+)?", text)
+                    if match:
+                        score = max(-1.0, min(1.0, float(match.group())))
+                except Exception as exc:
+                    logger.warning(f"LLM sentiment scoring failed: {exc}")
+                    score = 0.0
+
+            results.append(
+                {
+                    "title": title,
+                    "source": article.get("source", ""),
+                    "published_at": article.get("publishedAt", ""),
+                    "url": article.get("url", ""),
+                    "sentiment_score": score,
+                }
+            )
+
+        return results
+
+    @staticmethod
+    def compute_aggregate_sentiment(articles: list[dict]) -> dict:
+        """Compute aggregate sentiment metrics from a list of scored articles.
+
+        Returns overall_score (weighted avg, recent 2x), positive_count,
+        negative_count, neutral_count, sentiment_label, top_positive, top_negative.
+        """
+        if not articles:
+            return {
+                "overall_score": 0.0,
+                "positive_count": 0,
+                "negative_count": 0,
+                "neutral_count": 0,
+                "sentiment_label": "NEUTRAL",
+                "top_positive": "",
+                "top_negative": "",
+            }
+
+        positive_count = 0
+        negative_count = 0
+        neutral_count = 0
+        weighted_sum = 0.0
+        total_weight = 0.0
+
+        for idx, article in enumerate(articles):
+            score = article.get("sentiment_score", 0.0) or 0.0
+            # Recent articles (lower index after sorting by recency) get weight 2
+            weight = 2.0 if idx < len(articles) // 2 else 1.0
+            weighted_sum += score * weight
+            total_weight += weight
+
+            if score > 0.1:
+                positive_count += 1
+            elif score < -0.1:
+                negative_count += 1
+            else:
+                neutral_count += 1
+
+        overall_score = round(weighted_sum / total_weight, 4) if total_weight > 0 else 0.0
+
+        if overall_score > 0.2:
+            sentiment_label = "BULLISH"
+        elif overall_score < -0.2:
+            sentiment_label = "BEARISH"
+        else:
+            sentiment_label = "NEUTRAL"
+
+        sorted_by_score = sorted(articles, key=lambda a: a.get("sentiment_score", 0.0) or 0.0)
+        top_negative = sorted_by_score[0].get("title", "") if sorted_by_score else ""
+        top_positive = sorted_by_score[-1].get("title", "") if sorted_by_score else ""
+
+        return {
+            "overall_score": overall_score,
+            "positive_count": positive_count,
+            "negative_count": negative_count,
+            "neutral_count": neutral_count,
+            "sentiment_label": sentiment_label,
+            "top_positive": top_positive,
+            "top_negative": top_negative,
+        }
+
     def get_insider_transactions(self, ticker: str) -> dict:
         """Return insider buying/selling activity."""
         # Insider data typically requires a paid API; return mock data

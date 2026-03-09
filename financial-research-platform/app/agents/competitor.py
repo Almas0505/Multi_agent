@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.agents.base import BaseAgent
 from app.models.state import FinancialResearchState
 from app.tools.competitor_tool import CompetitorTool
+from app.tools.yfinance_tool import YFinanceTool
 
 
 class CompetitorAgent(BaseAgent):
@@ -13,6 +14,7 @@ class CompetitorAgent(BaseAgent):
     def __init__(self, llm=None) -> None:
         super().__init__(llm=llm)
         self._competitor = CompetitorTool()
+        self._yf = YFinanceTool()
 
     async def run(self, state: FinancialResearchState) -> dict:
         """Run competitor analysis for the ticker in *state*."""
@@ -20,37 +22,58 @@ class CompetitorAgent(BaseAgent):
         self.logger.info(f"CompetitorAgent starting for {ticker}")
 
         try:
-            peers = self._competitor.get_peers(ticker)
-            comparison_table = self._competitor.compare_metrics(ticker, peers)
+            peer_comparison = self._competitor.get_peer_comparison(ticker)
+            peers = peer_comparison.get("peers", [])
+            vs_peers = peer_comparison.get("vs_peers", {})
 
-            subject = comparison_table.get(ticker, {})
+            # Get subject metrics for moat analysis
+            subject_metrics = self._yf.get_financial_metrics(ticker)
+            moat_analysis = self._competitor.get_moat_analysis(ticker, subject_metrics)
+
+            # Build prompt table
             peer_rows = "\n".join(
-                f"  {sym}: P/E={v.get('pe_ratio')}, Margin={v.get('net_margin')}, ROE={v.get('roe')}"
-                for sym, v in comparison_table.items()
-                if sym != ticker
+                f"  {p['ticker']}: P/E={p.get('pe_ratio')}, "
+                f"Margin={p.get('net_margin')}, ROE={p.get('roe')}, "
+                f"Growth={p.get('revenue_growth')}"
+                for p in peers
             )
 
             prompt = (
                 f"You are a competitive analyst. Compare {ticker} against its peers:\n"
-                f"{ticker}: P/E={subject.get('pe_ratio')}, Net Margin={subject.get('net_margin')}, "
-                f"ROE={subject.get('roe')}, Revenue Growth={subject.get('revenue_growth')}\n"
+                f"{ticker}: P/E={subject_metrics.get('pe_ratio')}, "
+                f"Net Margin={subject_metrics.get('net_margin')}, "
+                f"ROE={subject_metrics.get('roe')}, "
+                f"Revenue Growth={subject_metrics.get('revenue_growth')}\n"
                 f"Peers:\n{peer_rows}\n\n"
-                f"Evaluate competitive position and economic moat. "
-                f"Determine if the company is a leader, parity, or laggard relative to peers."
+                f"PE Percentile Rank: {vs_peers.get('pe_percentile')}, "
+                f"Margin Rank: {vs_peers.get('margin_rank')}, "
+                f"Growth Rank: {vs_peers.get('growth_rank')}\n\n"
+                f"Moat: {moat_analysis}\n\n"
+                f"Evaluate competitive position and provide a BUY/HOLD/SELL rating."
             )
             analysis_text = await self._invoke_llm(
                 prompt,
-                fallback=self._mock_analysis_text(ticker, peers),
+                fallback=self._mock_analysis_text(ticker, [p["ticker"] for p in peers]),
             )
-            competitive_position = self._assess_position(ticker, comparison_table)
+
+            # Determine rating based on vs_peers rankings
+            avg_rank = (
+                (vs_peers.get("pe_percentile", 3) +
+                 vs_peers.get("margin_rank", 3) +
+                 vs_peers.get("growth_rank", 3)) / 3
+            )
+            rating = "BUY" if avg_rank <= 2 else ("SELL" if avg_rank >= 4 else "HOLD")
 
             return {
                 "competitor_data": {
-                    "competitors": peers,
-                    "comparison_table": comparison_table,
-                    "competitive_position": competitive_position,
-                    "moat_analysis": f"Based on metrics, {ticker} shows a {competitive_position} competitive position.",
+                    "competitors": [p["ticker"] for p in peers],
+                    "peers": peers,
+                    "vs_peers": vs_peers,
+                    "comparison_table": {ticker: subject_metrics, **{p["ticker"]: p for p in peers}},
+                    "competitive_position": self._assess_position(ticker, {ticker: subject_metrics, **{p["ticker"]: p for p in peers}}),
+                    "moat_analysis": moat_analysis,
                     "analysis_text": analysis_text,
+                    "rating": rating,
                 },
                 "completed_agents": state.get("completed_agents", []) + ["competitor"],
             }
@@ -89,8 +112,11 @@ class CompetitorAgent(BaseAgent):
     def _mock_competitor(self, ticker: str) -> dict:
         return {
             "competitors": ["MSFT", "GOOGL", "META"],
+            "peers": [],
+            "vs_peers": {"pe_percentile": 2, "margin_rank": 1, "growth_rank": 2},
             "comparison_table": {ticker: {"name": f"{ticker} (Mock)", "pe_ratio": 25.5}},
             "competitive_position": "leader",
             "moat_analysis": f"Mock moat analysis for {ticker}.",
             "analysis_text": f"Mock competitor analysis for {ticker}.",
+            "rating": "HOLD",
         }

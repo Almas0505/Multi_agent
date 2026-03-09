@@ -22,6 +22,12 @@ try:
 except ImportError:  # pragma: no cover
     _MPL_AVAILABLE = False
 
+try:
+    import numpy as np
+    _NUMPY_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _NUMPY_AVAILABLE = False
+
 from app.config import settings
 
 
@@ -167,3 +173,264 @@ class TechnicalIndicatorsTool:
             "resistance_levels": [185.0, 190.0, 195.0, 200.0, 210.0],
             "support_levels": [165.0, 160.0, 155.0, 150.0, 140.0],
         }
+
+    # ------------------------------------------------------------------
+    # New Phase 2 methods
+    # ------------------------------------------------------------------
+
+    def compute_all(self, ticker: str, period: str = "1y") -> dict:
+        """Fetch OHLCV, compute all indicators, and return a comprehensive dict.
+
+        Computes RSI(14), MACD, Bollinger Bands(20), SMA20, SMA50, Volume SMA20,
+        support/resistance levels. Returns last 60 data points for chart efficiency.
+        """
+        try:
+            from app.tools.yfinance_tool import YFinanceTool
+            price_data = YFinanceTool().get_historical_prices(ticker, period)
+            closes = price_data.get("close", [])
+            volumes = price_data.get("volume", [])
+
+            if not closes or len(closes) < 20:
+                return self._mock_compute_all()
+
+            if not _NUMPY_AVAILABLE:
+                return self._mock_compute_all()
+
+            closes_arr = np.array(closes, dtype=float)
+            volumes_arr = np.array(volumes, dtype=float)
+
+            # --- RSI(14) ---
+            rsi_arr = self._compute_rsi(closes_arr, period=14)
+
+            # --- MACD: EMA12 - EMA26; signal = EMA9(MACD) ---
+            ema12 = self._ema(closes_arr, 12)
+            ema26 = self._ema(closes_arr, 26)
+            macd_line = ema12 - ema26
+            signal_line = self._ema(macd_line, 9)
+            histogram = macd_line - signal_line
+
+            # --- Bollinger Bands (20-period SMA ± 2 std) ---
+            sma20_arr = self._sma(closes_arr, 20)
+            std20 = self._rolling_std(closes_arr, 20)
+            bb_upper_arr = sma20_arr + 2 * std20
+            bb_lower_arr = sma20_arr - 2 * std20
+
+            # --- SMA50 ---
+            sma50_arr = self._sma(closes_arr, 50)
+
+            # --- Volume SMA20 ---
+            vol_sma20_arr = self._sma(volumes_arr, 20)
+
+            # --- Support / Resistance (last 20 closes) ---
+            recent_closes = closes_arr[-20:]
+            support = float(np.min(recent_closes))
+            resistance = float(np.max(recent_closes))
+
+            # Trim to last 60 points
+            n = min(60, len(closes_arr))
+            dates_trimmed = price_data.get("dates", [])[-n:]
+            closes_trimmed = closes_arr[-n:].tolist()
+            volumes_trimmed = volumes_arr[-n:].tolist()
+
+            def _last(arr):
+                a = np.array(arr, dtype=float)
+                valid = a[~np.isnan(a)]
+                return round(float(valid[-1]), 4) if len(valid) > 0 else None
+
+            return {
+                "ticker": ticker,
+                "dates": dates_trimmed,
+                "close": closes_trimmed,
+                "volume": volumes_trimmed,
+                "rsi": _last(rsi_arr[-n:]),
+                "macd": _last(macd_line[-n:]),
+                "signal_line": _last(signal_line[-n:]),
+                "macd_histogram": _last(histogram[-n:]),
+                "bb_upper": _last(bb_upper_arr[-n:]),
+                "bb_middle": _last(sma20_arr[-n:]),
+                "bb_lower": _last(bb_lower_arr[-n:]),
+                "sma20": _last(sma20_arr[-n:]),
+                "sma50": _last(sma50_arr[-n:]),
+                "volume_sma20": _last(vol_sma20_arr[-n:]),
+                "support": round(support, 4),
+                "resistance": round(resistance, 4),
+                "current_price": round(float(closes_arr[-1]), 4),
+            }
+        except Exception as exc:
+            logger.warning(f"compute_all failed for {ticker}: {exc}")
+            return self._mock_compute_all()
+
+    def generate_chart_from_indicators(self, ticker: str, indicators_data: dict) -> str:
+        """Generate a 3-panel chart (Price+BB, Volume, RSI) and save to /tmp/{ticker}_chart.png."""
+        output_path = f"/tmp/{ticker}_chart.png"
+
+        if not _MPL_AVAILABLE:
+            logger.warning("matplotlib not available; skipping chart generation")
+            return ""
+
+        try:
+            closes = indicators_data.get("close", [])
+            volumes = indicators_data.get("volume", [])
+            dates = indicators_data.get("dates", [])
+
+            if not closes:
+                return ""
+
+            x = list(range(len(closes)))
+
+            fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True,
+                                     gridspec_kw={"height_ratios": [3, 1, 1]})
+
+            # --- Top panel: Price + Bollinger Bands + SMA ---
+            ax1 = axes[0]
+            ax1.plot(x, closes, color="#2196F3", linewidth=1.5, label="Close")
+
+            bb_upper = indicators_data.get("bb_upper")
+            bb_lower = indicators_data.get("bb_lower")
+            bb_middle = indicators_data.get("bb_middle")
+
+            if bb_upper is not None and bb_lower is not None:
+                bb_u = [bb_upper] * len(closes) if isinstance(bb_upper, (int, float)) else list(bb_upper)
+                bb_l = [bb_lower] * len(closes) if isinstance(bb_lower, (int, float)) else list(bb_lower)
+                ax1.fill_between(x, bb_l, bb_u, alpha=0.15, color="orange", label="BB Band")
+            if bb_middle is not None:
+                bb_m = [bb_middle] * len(closes) if isinstance(bb_middle, (int, float)) else list(bb_middle)
+                ax1.plot(x, bb_m, color="orange", linewidth=0.8, linestyle="--", label="BB Middle")
+
+            sma20 = indicators_data.get("sma20")
+            sma50 = indicators_data.get("sma50")
+            if sma20 is not None:
+                ax1.axhline(sma20, color="green", linewidth=0.9, linestyle="--",
+                            label=f"SMA20 {sma20:.1f}")
+            if sma50 is not None:
+                ax1.axhline(sma50, color="red", linewidth=0.9, linestyle="--",
+                            label=f"SMA50 {sma50:.1f}")
+
+            ax1.set_title(f"{ticker} – Technical Analysis", fontsize=14, fontweight="bold")
+            ax1.set_ylabel("Price (USD)")
+            ax1.legend(fontsize=7, loc="upper left")
+            ax1.grid(True, alpha=0.3)
+
+            # --- Middle panel: Volume ---
+            ax2 = axes[1]
+            ax2.bar(x, volumes, color="#90CAF9", width=0.8)
+            ax2.set_ylabel("Volume")
+            ax2.grid(True, alpha=0.3)
+
+            # --- Bottom panel: RSI ---
+            ax3 = axes[2]
+            rsi_val = indicators_data.get("rsi")
+            if rsi_val is not None:
+                ax3.axhline(rsi_val, color="#FF5722", linewidth=1.2,
+                            label=f"RSI {rsi_val:.1f}")
+            ax3.axhline(70, color="red", linewidth=0.8, linestyle="--", alpha=0.7)
+            ax3.axhline(30, color="green", linewidth=0.8, linestyle="--", alpha=0.7)
+            ax3.fill_between(x, [70] * len(closes), [100] * len(closes), alpha=0.05, color="red")
+            ax3.fill_between(x, [0] * len(closes), [30] * len(closes), alpha=0.05, color="green")
+            ax3.set_ylim(0, 100)
+            ax3.set_ylabel("RSI")
+            ax3.legend(fontsize=7)
+            ax3.grid(True, alpha=0.3)
+
+            if dates:
+                step = max(1, len(dates) // 6)
+                tick_positions = list(range(0, len(dates), step))
+                ax3.set_xticks(tick_positions)
+                ax3.set_xticklabels([dates[i] for i in tick_positions], rotation=45, ha="right")
+
+            plt.tight_layout()
+            plt.savefig(output_path, dpi=100, bbox_inches="tight")
+            plt.close(fig)
+            logger.info(f"Technical chart saved to {output_path}")
+            return output_path
+        except Exception as exc:
+            logger.warning(f"Technical chart generation failed for {ticker}: {exc}")
+            return ""
+
+    @staticmethod
+    def get_trend_signal(indicators_data: dict) -> str:
+        """Return BULLISH, BEARISH, or NEUTRAL based on RSI, MACD, SMA alignment."""
+        rsi = indicators_data.get("rsi") or 50
+        macd = indicators_data.get("macd") or 0
+        signal = indicators_data.get("signal_line") or 0
+        close = indicators_data.get("current_price") or 0
+        sma20 = indicators_data.get("sma20") or 0
+        sma50 = indicators_data.get("sma50") or 0
+
+        bullish = rsi > 50 and macd > signal and close > sma20 > sma50
+        bearish = rsi < 50 and macd < signal and close < sma20 < sma50
+
+        if bullish:
+            return "BULLISH"
+        if bearish:
+            return "BEARISH"
+        return "NEUTRAL"
+
+    # --- Numpy-based indicator helpers ---
+
+    @staticmethod
+    def _ema(arr: "np.ndarray", span: int) -> "np.ndarray":
+        """Exponential moving average."""
+        result = np.full_like(arr, np.nan, dtype=float)
+        k = 2.0 / (span + 1)
+        result[span - 1] = np.mean(arr[:span])
+        for i in range(span, len(arr)):
+            result[i] = arr[i] * k + result[i - 1] * (1 - k)
+        return result
+
+    @staticmethod
+    def _sma(arr: "np.ndarray", window: int) -> "np.ndarray":
+        result = np.full_like(arr, np.nan, dtype=float)
+        for i in range(window - 1, len(arr)):
+            result[i] = np.mean(arr[i - window + 1:i + 1])
+        return result
+
+    @staticmethod
+    def _rolling_std(arr: "np.ndarray", window: int) -> "np.ndarray":
+        result = np.full_like(arr, np.nan, dtype=float)
+        for i in range(window - 1, len(arr)):
+            result[i] = np.std(arr[i - window + 1:i + 1], ddof=0)
+        return result
+
+    def _compute_rsi(self, arr: "np.ndarray", period: int = 14) -> "np.ndarray":
+        """Standard Wilder RSI."""
+        result = np.full_like(arr, np.nan, dtype=float)
+        if len(arr) < period + 1:
+            return result
+        deltas = np.diff(arr)
+        gains = np.where(deltas > 0, deltas, 0.0)
+        losses = np.where(deltas < 0, -deltas, 0.0)
+        avg_gain = np.mean(gains[:period])
+        avg_loss = np.mean(losses[:period])
+        for i in range(period, len(arr)):
+            idx = i - 1
+            avg_gain = (avg_gain * (period - 1) + gains[idx]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[idx]) / period
+            rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
+            result[i] = 100 - 100 / (1 + rs)
+        return result
+
+    def _mock_compute_all(self) -> dict:
+        return {
+            "ticker": "MOCK",
+            "dates": [],
+            "close": [175.0],
+            "volume": [50_000_000],
+            "rsi": 55.3,
+            "macd": 1.25,
+            "signal_line": 0.98,
+            "macd_histogram": 0.27,
+            "bb_upper": 185.0,
+            "bb_middle": 175.0,
+            "bb_lower": 165.0,
+            "sma20": 174.0,
+            "sma50": 172.5,
+            "volume_sma20": 50_000_000,
+            "support": 165.0,
+            "resistance": 185.0,
+            "current_price": 175.0,
+        }
+
+
+# Alias for new agent usage
+TechnicalIndicators = TechnicalIndicatorsTool

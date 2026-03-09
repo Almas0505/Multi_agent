@@ -69,6 +69,7 @@ class YFinanceTool:
                 "52w_high": info.get("fiftyTwoWeekHigh"),
                 "52w_low": info.get("fiftyTwoWeekLow"),
                 "current_price": info.get("currentPrice") or info.get("regularMarketPrice"),
+                "shares_outstanding": info.get("sharesOutstanding"),
             }
         except Exception as exc:
             logger.warning(f"YFinance get_financial_metrics failed for {ticker}: {exc}")
@@ -114,16 +115,134 @@ class YFinanceTool:
             logger.warning(f"YFinance get_financial_statements failed for {ticker}: {exc}")
             return self._mock_financial_statements(ticker)
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def get_shares_outstanding(self, ticker: str) -> int:
+        """Return the number of shares outstanding for *ticker*."""
+        if not _YFINANCE_AVAILABLE:
+            return 15_000_000_000
+        try:
+            info = yf.Ticker(ticker).info
+            return info.get("sharesOutstanding") or 15_000_000_000
+        except Exception as exc:
+            logger.warning(f"YFinance get_shares_outstanding failed for {ticker}: {exc}")
+            return 15_000_000_000
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def get_income_statement_summary(self, ticker: str) -> dict:
+        """Return a clean summary of the income statement for the last 2 years."""
+        if not _YFINANCE_AVAILABLE:
+            return self._mock_income_statement_summary()
+        try:
+            t = yf.Ticker(ticker)
+            financials = t.financials
+            if financials is None or financials.empty:
+                return self._mock_income_statement_summary()
+
+            def _row(df, *keys):
+                for key in keys:
+                    if key in df.index:
+                        vals = df.loc[key]
+                        cols = vals.index.tolist()[:2]
+                        return {str(c.date()) if hasattr(c, "date") else str(c): vals[c] for c in cols}
+                return {}
+
+            return {
+                "revenue": _row(financials, "Total Revenue"),
+                "net_income": _row(financials, "Net Income"),
+                "gross_profit": _row(financials, "Gross Profit"),
+                "operating_income": _row(financials, "Operating Income", "EBIT"),
+            }
+        except Exception as exc:
+            logger.warning(f"YFinance get_income_statement_summary failed for {ticker}: {exc}")
+            return self._mock_income_statement_summary()
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def get_balance_sheet_summary(self, ticker: str) -> dict:
+        """Return a clean summary of the balance sheet."""
+        if not _YFINANCE_AVAILABLE:
+            return self._mock_balance_sheet_summary()
+        try:
+            t = yf.Ticker(ticker)
+            balance = t.balance_sheet
+            if balance is None or balance.empty:
+                return self._mock_balance_sheet_summary()
+
+            def _row(df, *keys):
+                for key in keys:
+                    if key in df.index:
+                        vals = df.loc[key]
+                        cols = vals.index.tolist()[:2]
+                        return {str(c.date()) if hasattr(c, "date") else str(c): vals[c] for c in cols}
+                return {}
+
+            return {
+                "total_assets": _row(balance, "Total Assets"),
+                "total_debt": _row(balance, "Total Debt", "Long Term Debt"),
+                "stockholders_equity": _row(balance, "Stockholders Equity", "Total Stockholder Equity"),
+                "cash_and_equivalents": _row(balance, "Cash And Cash Equivalents", "Cash"),
+            }
+        except Exception as exc:
+            logger.warning(f"YFinance get_balance_sheet_summary failed for {ticker}: {exc}")
+            return self._mock_balance_sheet_summary()
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def get_cashflow_summary(self, ticker: str) -> dict:
+        """Return a clean summary of the cash flow statement."""
+        if not _YFINANCE_AVAILABLE:
+            return self._mock_cashflow_summary()
+        try:
+            t = yf.Ticker(ticker)
+            cashflow = t.cashflow
+            if cashflow is None or cashflow.empty:
+                return self._mock_cashflow_summary()
+
+            def _row(df, *keys):
+                for key in keys:
+                    if key in df.index:
+                        vals = df.loc[key]
+                        cols = vals.index.tolist()[:2]
+                        return {str(c.date()) if hasattr(c, "date") else str(c): vals[c] for c in cols}
+                return {}
+
+            return {
+                "operating_cash_flow": _row(cashflow, "Operating Cash Flow", "Total Cash From Operating Activities"),
+                "free_cash_flow": _row(cashflow, "Free Cash Flow"),
+                "capex": _row(cashflow, "Capital Expenditure", "Capital Expenditures"),
+            }
+        except Exception as exc:
+            logger.warning(f"YFinance get_cashflow_summary failed for {ticker}: {exc}")
+            return self._mock_cashflow_summary()
+
     def get_peer_companies(self, ticker: str) -> list[str]:
         """Return a list of peer/competitor ticker symbols."""
         # yfinance does not expose peers directly; return a static mock map
         peers_map: dict[str, list[str]] = {
-            "AAPL": ["MSFT", "GOOGL", "META", "AMZN"],
-            "MSFT": ["AAPL", "GOOGL", "AMZN", "META"],
-            "GOOGL": ["META", "MSFT", "AMZN", "AAPL"],
-            "AMZN": ["MSFT", "GOOGL", "AAPL", "WMT"],
-            "TSLA": ["F", "GM", "RIVN", "NIO"],
-            "META": ["SNAP", "GOOGL", "TWTR", "PINS"],
+            "AAPL": ["MSFT", "GOOGL", "META", "AMZN", "NVDA"],
+            "MSFT": ["AAPL", "GOOGL", "AMZN", "META", "CRM"],
+            "GOOGL": ["META", "MSFT", "AMZN", "AAPL", "SNAP"],
+            "AMZN": ["MSFT", "GOOGL", "AAPL", "WMT", "SHOP"],
+            "TSLA": ["F", "GM", "RIVN", "NIO", "LCID"],
+            "META": ["SNAP", "GOOGL", "PINS", "TWTR", "RDDT"],
+            "NVDA": ["AMD", "INTC", "QCOM", "AVGO", "TXN"],
+            "AMD": ["NVDA", "INTC", "QCOM", "TXN", "MU"],
+            "INTC": ["NVDA", "AMD", "QCOM", "TXN", "AVGO"],
+            "CRM": ["ORCL", "SAP", "NOW", "MSFT", "ADBE"],
+            "ORCL": ["SAP", "CRM", "IBM", "NOW", "MSFT"],
+            "SAP": ["ORCL", "CRM", "IBM", "NOW", "MSFT"],
+            "IBM": ["MSFT", "ORCL", "HPQ", "DELL", "CRM"],
+            "HPQ": ["DELL", "IBM", "AAPL", "MSFT", "INTC"],
+            "DELL": ["HPQ", "IBM", "AAPL", "MSFT", "INTC"],
+            "QCOM": ["NVDA", "AMD", "INTC", "TXN", "AVGO"],
+            "TXN": ["NVDA", "AMD", "QCOM", "AVGO", "MU"],
+            "AVGO": ["NVDA", "QCOM", "TXN", "AMD", "MU"],
+            "MU": ["NVDA", "AMD", "INTC", "AVGO", "TXN"],
+            "NOW": ["CRM", "ORCL", "SAP", "ADBE", "MSFT"],
+            "ADBE": ["CRM", "NOW", "ORCL", "MSFT", "INTU"],
+            "PYPL": ["SQ", "V", "MA", "ADYEY", "AFRM"],
+            "SQ": ["PYPL", "V", "MA", "ADYEY", "AFRM"],
+            "NFLX": ["DIS", "PARA", "WBD", "AMZN", "AAPL"],
+            "DIS": ["NFLX", "PARA", "WBD", "CMCSA", "AMZN"],
+            "SPOT": ["AAPL", "AMZN", "GOOGL", "NFLX", "PANDORA"],
         }
         return peers_map.get(ticker.upper(), ["SPY", "QQQ", "DIA"])
 
@@ -166,6 +285,7 @@ class YFinanceTool:
             "52w_high": 200.0,
             "52w_low": 130.0,
             "current_price": 175.0,
+            "shares_outstanding": 15_000_000_000,
         }
 
     def _mock_historical_prices(self, ticker: str) -> dict:
@@ -203,4 +323,27 @@ class YFinanceTool:
                 "Free Cash Flow": {"2023": 99_584_000_000, "2022": 111_443_000_000},
                 "Capital Expenditure": {"2023": -10_959_000_000, "2022": -10_708_000_000},
             },
+        }
+
+    def _mock_income_statement_summary(self) -> dict:
+        return {
+            "revenue": {"2023-09-30": 383_285_000_000, "2022-09-30": 394_328_000_000},
+            "net_income": {"2023-09-30": 96_995_000_000, "2022-09-30": 99_803_000_000},
+            "gross_profit": {"2023-09-30": 169_148_000_000, "2022-09-30": 170_782_000_000},
+            "operating_income": {"2023-09-30": 114_301_000_000, "2022-09-30": 119_437_000_000},
+        }
+
+    def _mock_balance_sheet_summary(self) -> dict:
+        return {
+            "total_assets": {"2023-09-30": 352_583_000_000, "2022-09-30": 352_755_000_000},
+            "total_debt": {"2023-09-30": 109_280_000_000, "2022-09-30": 120_069_000_000},
+            "stockholders_equity": {"2023-09-30": 62_146_000_000, "2022-09-30": 50_672_000_000},
+            "cash_and_equivalents": {"2023-09-30": 29_965_000_000, "2022-09-30": 23_646_000_000},
+        }
+
+    def _mock_cashflow_summary(self) -> dict:
+        return {
+            "operating_cash_flow": {"2023-09-30": 110_543_000_000, "2022-09-30": 122_151_000_000},
+            "free_cash_flow": {"2023-09-30": 99_584_000_000, "2022-09-30": 111_443_000_000},
+            "capex": {"2023-09-30": -10_959_000_000, "2022-09-30": -10_708_000_000},
         }

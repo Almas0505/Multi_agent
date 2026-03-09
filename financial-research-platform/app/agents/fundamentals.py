@@ -23,8 +23,19 @@ class FundamentalsAgent(BaseAgent):
 
         try:
             metrics = self._yf.get_financial_metrics(ticker)
-            sec_summary = self._sec.get_annual_report_summary(ticker)
-            dcf_value = self._compute_dcf(metrics)
+            sec_result = self._sec.get_annual_report_summary(ticker)
+            # Support both dict (new) and str (legacy) return types
+            if isinstance(sec_result, dict):
+                sec_summary = sec_result.get("summary_text", str(sec_result))
+            else:
+                sec_summary = str(sec_result)
+
+            # New Phase 2: real shares outstanding and income statement
+            shares_outstanding = self._yf.get_shares_outstanding(ticker)
+            income_summary = self._yf.get_income_statement_summary(ticker)
+            revenue_trend = income_summary.get("revenue", {})
+
+            dcf_value = self._compute_dcf(metrics, shares_outstanding)
 
             prompt = (
                 f"You are a Wall Street fundamental analyst. "
@@ -33,6 +44,8 @@ class FundamentalsAgent(BaseAgent):
                 f"EV/EBITDA: {metrics.get('ev_ebitda')}, Net Margin: {metrics.get('net_margin')}, "
                 f"ROE: {metrics.get('roe')}, D/E: {metrics.get('debt_equity')}, "
                 f"Revenue Growth: {metrics.get('revenue_growth')}, FCF: {metrics.get('free_cash_flow')}\n"
+                f"Revenue Trend: {revenue_trend}\n"
+                f"Shares Outstanding: {shares_outstanding:,}\n"
                 f"DCF Fair Value estimate: ${dcf_value:.2f}\n"
                 f"SEC Summary: {sec_summary}\n"
                 f"Provide a concise fundamental analysis with a BUY/HOLD/SELL rating."
@@ -58,6 +71,8 @@ class FundamentalsAgent(BaseAgent):
                     "analysis_text": analysis_text,
                     "rating": rating,
                     "sec_summary": sec_summary,
+                    "shares_outstanding": shares_outstanding,
+                    "revenue_trend": revenue_trend,
                 },
                 "completed_agents": state.get("completed_agents", []) + ["fundamentals"],
             }
@@ -73,13 +88,13 @@ class FundamentalsAgent(BaseAgent):
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _compute_dcf(self, metrics: dict) -> float:
+    def _compute_dcf(self, metrics: dict, shares_outstanding: int | None = None) -> float:
         """Simplified DCF based on FCF and growth assumptions."""
         fcf = metrics.get("free_cash_flow") or 90_000_000_000
         growth_rate = metrics.get("revenue_growth") or 0.08
         discount_rate = 0.10
         terminal_growth = 0.03
-        shares = 15_000_000_000  # approximate share count; would be fetched in production
+        shares = shares_outstanding or 15_000_000_000
 
         projected_fcf = sum(
             fcf * (1 + growth_rate) ** year / (1 + discount_rate) ** year
@@ -125,4 +140,6 @@ class FundamentalsAgent(BaseAgent):
             "analysis_text": f"Mock fundamental analysis for {ticker}.",
             "rating": "BUY",
             "sec_summary": f"Mock SEC summary for {ticker}.",
+            "shares_outstanding": 15_000_000_000,
+            "revenue_trend": {},
         }

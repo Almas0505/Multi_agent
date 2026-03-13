@@ -1,8 +1,10 @@
+
 """CompetitorAgent – peer comparison and moat analysis."""
 
 from __future__ import annotations
 
 from app.agents.base import BaseAgent
+from app.models.errors import make_agent_error
 from app.models.state import FinancialResearchState
 from app.tools.competitor_tool import CompetitorTool
 from app.tools.yfinance_tool import YFinanceTool
@@ -82,7 +84,7 @@ class CompetitorAgent(BaseAgent):
             self.logger.error(f"CompetitorAgent failed for {ticker}: {exc}")
             return {
                 "competitor_data": self._mock_competitor(ticker),
-                "errors": state.get("errors", []) + [f"CompetitorAgent: {exc}"],
+                "errors": state.get("errors", []) + [make_agent_error("competitor", exc)],
                 "completed_agents": state.get("completed_agents", []) + ["competitor"],
             }
 

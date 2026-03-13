@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd C:/Projects/multi_agent/Multi_agent/financial-research-platform && source ../venv/Scripts/activate && pip install slowapi pybreaker pytest-cov -q 2>&1 | tail -5)",
+      "Bash(cd C:/Projects/multi_agent/Multi_agent/financial-research-platform && source ../venv/Scripts/activate && pip install pytest-asyncio httpx -q 2>&1 | tail -3 && python -m pytest tests/test_models/ tests/test_services/ -v 2>&1)",
+      "Bash(cd C:/Projects/multi_agent/Multi_agent/financial-research-platform && source ../venv/Scripts/activate && python -m pytest --tb=short -q 2>&1)"
+    ]
+  }
+}

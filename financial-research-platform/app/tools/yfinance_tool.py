@@ -1,4 +1,4 @@
-"""YFinance data-fetching tool with tenacity retry and mock fallbacks."""
+"""YFinance data-fetching tool with tenacity retry, circuit breaker, and mock fallbacks."""
 
 from __future__ import annotations
 
@@ -11,9 +11,17 @@ try:
 except ImportError:  # pragma: no cover
     _YFINANCE_AVAILABLE = False
 
+try:
+    import pybreaker as _pb  # type: ignore
+    _PYBREAKER_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _PYBREAKER_AVAILABLE = False
+
+from app.services.circuit_breaker import yfinance_breaker
+
 
 class YFinanceTool:
-    """Wrapper around yfinance with retry logic and mock data fallbacks."""
+    """Wrapper around yfinance with retry logic, circuit breaker, and mock data fallbacks."""
 
     # ------------------------------------------------------------------
     # Public helpers
@@ -25,7 +33,7 @@ class YFinanceTool:
         if not _YFINANCE_AVAILABLE:
             return self._mock_company_info(ticker)
         try:
-            info = yf.Ticker(ticker).info
+            info = yfinance_breaker.call(lambda: yf.Ticker(ticker).info)
             return {
                 "name": info.get("longName", ticker),
                 "sector": info.get("sector", "Unknown"),
@@ -47,7 +55,7 @@ class YFinanceTool:
         if not _YFINANCE_AVAILABLE:
             return self._mock_financial_metrics(ticker)
         try:
-            info = yf.Ticker(ticker).info
+            info = yfinance_breaker.call(lambda: yf.Ticker(ticker).info)
             return {
                 "pe_ratio": info.get("trailingPE"),
                 "pb_ratio": info.get("priceToBook"),
@@ -81,7 +89,7 @@ class YFinanceTool:
         if not _YFINANCE_AVAILABLE:
             return self._mock_historical_prices(ticker)
         try:
-            hist = yf.Ticker(ticker).history(period=period)
+            hist = yfinance_breaker.call(lambda: yf.Ticker(ticker).history(period=period))
             if hist.empty:
                 return self._mock_historical_prices(ticker)
             return {
@@ -102,7 +110,7 @@ class YFinanceTool:
         if not _YFINANCE_AVAILABLE:
             return self._mock_financial_statements(ticker)
         try:
-            t = yf.Ticker(ticker)
+            t = yfinance_breaker.call(lambda: yf.Ticker(ticker))
             income = t.financials
             balance = t.balance_sheet
             cashflow = t.cashflow
@@ -121,7 +129,7 @@ class YFinanceTool:
         if not _YFINANCE_AVAILABLE:
             return 15_000_000_000
         try:
-            info = yf.Ticker(ticker).info
+            info = yfinance_breaker.call(lambda: yf.Ticker(ticker).info)
             return info.get("sharesOutstanding") or 15_000_000_000
         except Exception as exc:
             logger.warning(f"YFinance get_shares_outstanding failed for {ticker}: {exc}")
@@ -133,7 +141,7 @@ class YFinanceTool:
         if not _YFINANCE_AVAILABLE:
             return self._mock_income_statement_summary()
         try:
-            t = yf.Ticker(ticker)
+            t = yfinance_breaker.call(lambda: yf.Ticker(ticker))
             financials = t.financials
             if financials is None or financials.empty:
                 return self._mock_income_statement_summary()
@@ -162,7 +170,7 @@ class YFinanceTool:
         if not _YFINANCE_AVAILABLE:
             return self._mock_balance_sheet_summary()
         try:
-            t = yf.Ticker(ticker)
+            t = yfinance_breaker.call(lambda: yf.Ticker(ticker))
             balance = t.balance_sheet
             if balance is None or balance.empty:
                 return self._mock_balance_sheet_summary()
@@ -191,7 +199,7 @@ class YFinanceTool:
         if not _YFINANCE_AVAILABLE:
             return self._mock_cashflow_summary()
         try:
-            t = yf.Ticker(ticker)
+            t = yfinance_breaker.call(lambda: yf.Ticker(ticker))
             cashflow = t.cashflow
             if cashflow is None or cashflow.empty:
                 return self._mock_cashflow_summary()

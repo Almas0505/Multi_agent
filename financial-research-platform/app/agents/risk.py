@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from app.agents.base import BaseAgent
+from app.models.errors import make_agent_error
 from app.models.state import FinancialResearchState
 from app.tools.news_tool import NewsTool
 from app.tools.yfinance_tool import YFinanceTool
@@ -104,7 +105,7 @@ class RiskAgent(BaseAgent):
             self.logger.error(f"RiskAgent failed for {ticker}: {exc}")
             return {
                 "risk_data": self._mock_risk(ticker),
-                "errors": state.get("errors", []) + [f"RiskAgent: {exc}"],
+                "errors": state.get("errors", []) + [make_agent_error("risk", exc)],
                 "completed_agents": state.get("completed_agents", []) + ["risk"],
             }
 

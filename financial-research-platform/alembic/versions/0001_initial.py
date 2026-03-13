@@ -33,19 +33,18 @@ def upgrade() -> None:
         sa.Column("errors", sa.JSON, nullable=True),
         sa.Column(
             "created_at",
-            sa.DateTime,
+            sa.DateTime(timezone=True),
             nullable=False,
             server_default=sa.func.now(),
         ),
         sa.Column(
             "updated_at",
-            sa.DateTime,
+            sa.DateTime(timezone=True),
             nullable=False,
             server_default=sa.func.now(),
             onupdate=sa.func.now(),
         ),
     )
-    op.create_index("ix_reports_ticker", "reports", ["ticker"])
 
 
 def downgrade() -> None:

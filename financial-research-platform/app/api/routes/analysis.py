@@ -1,14 +1,14 @@
 """Analysis routes – start a new analysis and check task progress."""
 
-from __future__ import annotations
-
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_cache, get_db
+from app.api.middleware.rate_limiter import _SLOWAPI_AVAILABLE, limiter
+from app.config import settings
 from app.db import crud
 from app.models.schemas import AnalysisRequest, AnalysisResponse
 from app.services.cache import CacheService
@@ -28,10 +28,22 @@ def _validate_ticker(ticker: str) -> str:
     return cleaned
 
 
+def _rate_limit(limit_str: str):
+    """Return a slowapi limit decorator or a no-op if slowapi is unavailable."""
+    if _SLOWAPI_AVAILABLE:
+        return limiter.limit(limit_str)
+    # No-op decorator when slowapi is not installed
+    def _noop(fn):
+        return fn
+    return _noop
+
+
 @router.post("/analyze/{ticker}", response_model=AnalysisResponse)
+@_rate_limit(settings.RATE_LIMIT_ANALYSIS)
 async def start_analysis(
+    request: Request,
     ticker: str,
-    request: AnalysisRequest | None = None,
+    body: AnalysisRequest | None = None,
     db: AsyncSession = Depends(get_db),
     cache: CacheService = Depends(get_cache),
 ) -> AnalysisResponse:
@@ -42,7 +54,7 @@ async def start_analysis(
     validated_ticker = _validate_ticker(ticker)
 
     # Use request body fields if provided, else sensible defaults
-    include_pdf = (request.include_pdf if request else True)
+    include_pdf = (body.include_pdf if body else True)
 
     # Check recent cache hit
     cached = await cache.get(f"analysis:{validated_ticker}")
@@ -91,7 +103,9 @@ async def start_analysis(
 
 
 @router.get("/analyze/{task_id}/status")
+@_rate_limit(settings.RATE_LIMIT_STATUS)
 async def get_analysis_status(
+    request: Request,
     task_id: str,
     cache: CacheService = Depends(get_cache),
 ) -> dict:

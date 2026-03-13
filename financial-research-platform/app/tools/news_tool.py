@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from loguru import logger
 
 from app.config import settings
+from app.services.circuit_breaker import newsapi_breaker
 
 
 class NewsTool:
@@ -35,10 +37,15 @@ class NewsTool:
                 "apiKey": settings.NEWS_API_KEY,
                 "pageSize": 20,
             }
-            with httpx.Client(timeout=10) as client:
-                response = client.get(self._NEWSAPI_URL, params=params)
-                response.raise_for_status()
-            articles = response.json().get("articles", [])
+
+            def _fetch():
+                with httpx.Client(timeout=10) as client:
+                    r = client.get(self._NEWSAPI_URL, params=params)
+                    r.raise_for_status()
+                    return r.json()
+
+            data = newsapi_breaker.call(_fetch)
+            articles = data.get("articles", [])
             return [
                 {
                     "title": a.get("title", ""),
@@ -59,8 +66,12 @@ class NewsTool:
         Each article dict contains: title, source, published_at, url, sentiment_score.
         If *llm* is provided, each headline is scored from -1.0 to +1.0.
         Falls back to 0.0 on parse failure.
+
+        The synchronous HTTP call is dispatched via run_in_executor so it does
+        not block the async event loop.
         """
-        raw_articles = self.get_news(ticker, ticker)
+        loop = asyncio.get_event_loop()
+        raw_articles = await loop.run_in_executor(None, self.get_news, ticker, ticker)
         results: list[dict] = []
 
         for article in raw_articles:

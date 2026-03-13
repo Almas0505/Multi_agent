@@ -47,15 +47,19 @@ class CacheService:
             logger.warning(f"Cache get failed for {key}: {exc}")
             return self._fallback.get(key)
 
-    async def set(self, key: str, value: Any, ttl: int = 3600) -> None:
-        """Store *value* at *key* with optional TTL in seconds."""
+    async def set(self, key: str, value: Any, ttl: int | None = None) -> None:
+        """Store *value* at *key* with optional TTL in seconds.
+
+        Defaults to ``settings.CACHE_TTL_ANALYSIS`` when *ttl* is not supplied.
+        """
+        effective_ttl = ttl if ttl is not None else settings.CACHE_TTL_ANALYSIS
         client = await self._get_client()
         serialised = json.dumps(value)
         if client is None:
             self._fallback[key] = value
             return
         try:
-            await client.set(key, serialised, ex=ttl)
+            await client.set(key, serialised, ex=effective_ttl)
         except Exception as exc:
             logger.warning(f"Cache set failed for {key}: {exc}")
             self._fallback[key] = value
@@ -77,5 +81,5 @@ class CacheService:
         return await self.get(f"progress:{task_id}") or {}
 
     async def set_progress(self, task_id: str, progress: dict) -> None:
-        """Persist a progress dict for *task_id* (TTL 24 h)."""
-        await self.set(f"progress:{task_id}", progress, ttl=86400)
+        """Persist a progress dict for *task_id* using ``CACHE_TTL_PROGRESS``."""
+        await self.set(f"progress:{task_id}", progress, ttl=settings.CACHE_TTL_PROGRESS)

@@ -16,6 +16,25 @@ except ImportError:  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
+# Progress helper
+# ---------------------------------------------------------------------------
+
+async def _emit_progress(report_id: str | None, agent: str, progress: int, message: str) -> None:
+    """Write a progress update to the cache. Silently skips if report_id is absent."""
+    if not report_id:
+        return
+    try:
+        from app.services.cache import CacheService
+        cache = CacheService()
+        await cache.set_progress(
+            report_id,
+            {"agent": agent, "progress": progress, "status": "running", "message": message},
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.warning(f"Progress update failed for {report_id}: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Node functions
 # ---------------------------------------------------------------------------
 
@@ -26,6 +45,7 @@ async def init_node(state: FinancialResearchState) -> dict:
         raise ValueError(f"Invalid ticker symbol: '{ticker}'")
 
     logger.info(f"Initialising financial research for {ticker}")
+    await _emit_progress(state.get("report_id"), "init", 10, f"Fetching company info for {ticker}…")
 
     # Fetch company name and sector via YFinanceTool
     try:
@@ -52,51 +72,70 @@ async def init_node(state: FinancialResearchState) -> dict:
 
 async def fundamentals_node(state: FinancialResearchState) -> dict:
     """Execute the FundamentalsAgent."""
+    report_id = state.get("report_id")
+    await _emit_progress(report_id, "fundamentals", 20, "Running fundamentals analysis…")
     from app.agents.fundamentals import FundamentalsAgent
-    agent = FundamentalsAgent()
-    return await agent.run(state)
+    result = await FundamentalsAgent().run(state)
+    await _emit_progress(report_id, "fundamentals", 35, "Fundamentals analysis complete.")
+    return result
 
 
 async def sentiment_node(state: FinancialResearchState) -> dict:
     """Execute the SentimentAgent."""
+    report_id = state.get("report_id")
+    await _emit_progress(report_id, "sentiment", 20, "Running sentiment analysis…")
     from app.agents.sentiment import SentimentAgent
-    agent = SentimentAgent()
-    return await agent.run(state)
+    result = await SentimentAgent().run(state)
+    await _emit_progress(report_id, "sentiment", 35, "Sentiment analysis complete.")
+    return result
 
 
 async def technical_node(state: FinancialResearchState) -> dict:
     """Execute the TechnicalAgent."""
+    report_id = state.get("report_id")
+    await _emit_progress(report_id, "technical", 20, "Running technical analysis…")
     from app.agents.technical import TechnicalAgent
-    agent = TechnicalAgent()
-    return await agent.run(state)
+    result = await TechnicalAgent().run(state)
+    await _emit_progress(report_id, "technical", 35, "Technical analysis complete.")
+    return result
 
 
 async def competitor_node(state: FinancialResearchState) -> dict:
     """Execute the CompetitorAgent."""
+    report_id = state.get("report_id")
+    await _emit_progress(report_id, "competitor", 20, "Running competitor analysis…")
     from app.agents.competitor import CompetitorAgent
-    agent = CompetitorAgent()
-    return await agent.run(state)
+    result = await CompetitorAgent().run(state)
+    await _emit_progress(report_id, "competitor", 35, "Competitor analysis complete.")
+    return result
 
 
 async def risk_node(state: FinancialResearchState) -> dict:
     """Execute the RiskAgent."""
+    report_id = state.get("report_id")
+    await _emit_progress(report_id, "risk", 20, "Running risk analysis…")
     from app.agents.risk import RiskAgent
-    agent = RiskAgent()
-    return await agent.run(state)
+    result = await RiskAgent().run(state)
+    await _emit_progress(report_id, "risk", 35, "Risk analysis complete.")
+    return result
 
 
 async def aggregator_node(state: FinancialResearchState) -> dict:
     """Aggregate results from all parallel agents."""
     completed = state.get("completed_agents", [])
     logger.info(f"Aggregating results. Completed agents: {completed}")
+    await _emit_progress(state.get("report_id"), "aggregator", 60, "Aggregating agent results…")
     return {"status": "aggregating"}
 
 
 async def report_node(state: FinancialResearchState) -> dict:
     """Execute the ReportAgent to produce the final output."""
+    report_id = state.get("report_id")
+    await _emit_progress(report_id, "report", 75, "Generating final report…")
     from app.agents.report import ReportAgent
-    agent = ReportAgent()
-    return await agent.run(state)
+    result = await ReportAgent().run(state)
+    await _emit_progress(report_id, "report", 90, "Report generation complete.")
+    return result
 
 
 # ---------------------------------------------------------------------------

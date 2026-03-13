@@ -34,7 +34,16 @@ def _run_financial_analysis_sync(ticker: str, report_id: str, include_pdf: bool)
     """Synchronous wrapper executed inside the Celery worker process."""
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+    return loop.run_until_complete(
         _run_financial_analysis_async(ticker, report_id, include_pdf)
     )
 
@@ -47,10 +56,10 @@ async def _run_financial_analysis_async(ticker: str, report_id: str, include_pdf
 
     cache = CacheService()
 
-    async def _update_progress(agent: str, progress: int, message: str) -> None:
+    async def _update_progress(agent: str, progress: int, message: str, status: str = "running") -> None:
         await cache.set_progress(
             report_id,
-            {"agent": agent, "progress": progress, "status": "running", "message": message},
+            {"agent": agent, "progress": progress, "status": status, "message": message},
         )
 
     await _update_progress("init", 5, "Starting financial analysis…")
@@ -82,7 +91,8 @@ async def _run_financial_analysis_async(ticker: str, report_id: str, include_pdf
         # Fallback when graph is a plain coroutine function
         final_state = await financial_graph(initial_state)
 
-    await _update_progress("complete", 100, "Analysis complete.")
+    # Signal completion — WebSocket will close on this status
+    await _update_progress("complete", 100, "Analysis complete.", status="completed")
 
     # Persist results to database
     try:

@@ -1,7 +1,7 @@
 """Pydantic request and response schemas."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,7 @@ class ReportResponse(BaseModel):
     created_at: datetime
     pdf_url: Optional[str] = None
     data: Optional[dict] = None
+    errors: list[Any] = []
 
 
 class WebSocketMessage(BaseModel):

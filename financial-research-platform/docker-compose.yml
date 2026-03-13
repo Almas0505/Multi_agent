@@ -47,6 +47,7 @@ services:
     env_file: .env
     volumes:
       - ./app:/app/app
+      - ./alembic:/app/alembic
       - ./reports:/app/reports
     command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
@@ -58,6 +59,9 @@ services:
       redis:
         condition: service_healthy
     env_file: .env
+    volumes:
+      - ./app:/app/app
+      - ./reports:/app/reports
     command: celery -A app.services.celery_app worker --loglevel=info --concurrency=4
 
   celery_flower:

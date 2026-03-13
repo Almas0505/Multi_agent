@@ -5,15 +5,26 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.api.middleware.rate_limiter import _SLOWAPI_AVAILABLE, limiter
+from app.config import settings
 from app.db import crud
 from app.models.schemas import ReportResponse
 
 router = APIRouter()
+
+
+def _rate_limit(limit_str: str):
+    """Return a slowapi limit decorator or a no-op if slowapi is unavailable."""
+    if _SLOWAPI_AVAILABLE:
+        return limiter.limit(limit_str)
+    def _noop(fn):
+        return fn
+    return _noop
 
 
 def _report_to_response(report) -> ReportResponse:
@@ -30,13 +41,15 @@ def _report_to_response(report) -> ReportResponse:
             "competitor": report.competitor_data,
             "risk": report.risk_data,
             "final_analysis": report.final_analysis,
-            "errors": report.errors,
         },
+        errors=report.errors or [],
     )
 
 
 @router.get("/reports/", response_model=list[ReportResponse])
+@_rate_limit(settings.RATE_LIMIT_REPORTS)
 async def list_reports(
+    request: Request,
     skip: int = 0,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
@@ -47,7 +60,9 @@ async def list_reports(
 
 
 @router.get("/reports/{report_id}", response_model=ReportResponse)
+@_rate_limit(settings.RATE_LIMIT_REPORTS)
 async def get_report(
+    request: Request,
     report_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> ReportResponse:
@@ -59,7 +74,9 @@ async def get_report(
 
 
 @router.get("/reports/{report_id}/download")
+@_rate_limit(settings.RATE_LIMIT_REPORTS)
 async def download_report(
+    request: Request,
     report_id: str,
     db: AsyncSession = Depends(get_db),
 ):
@@ -76,8 +93,10 @@ async def download_report(
     )
 
 
-@router.delete("/reports/{report_id}", status_code=204)
+@router.delete("/reports/{report_id}", status_code=200)
+@_rate_limit(settings.RATE_LIMIT_REPORTS)
 async def delete_report(
+    request: Request,
     report_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -94,3 +113,4 @@ async def delete_report(
             pass
 
     await crud.delete_report(db, report_id)
+    return {"detail": f"Report '{report_id}' deleted."}

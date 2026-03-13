@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.agents.base import BaseAgent
+from app.models.errors import make_agent_error
 from app.models.state import FinancialResearchState
 from app.tools.technical_indicators import TechnicalIndicatorsTool, TechnicalIndicators
 from app.tools.yfinance_tool import YFinanceTool
@@ -75,7 +76,7 @@ class TechnicalAgent(BaseAgent):
             self.logger.error(f"TechnicalAgent failed for {ticker}: {exc}")
             return {
                 "technical_data": self._mock_technical(ticker),
-                "errors": state.get("errors", []) + [f"TechnicalAgent: {exc}"],
+                "errors": state.get("errors", []) + [make_agent_error("technical", exc)],
                 "completed_agents": state.get("completed_agents", []) + ["technical"],
             }
 

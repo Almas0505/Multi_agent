@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.agents.base import BaseAgent
+from app.models.errors import make_agent_error
 from app.models.state import FinancialResearchState
 from app.tools.news_tool import NewsTool
 
@@ -77,7 +78,7 @@ class SentimentAgent(BaseAgent):
             self.logger.error(f"SentimentAgent failed for {ticker}: {exc}")
             return {
                 "sentiment_data": self._mock_sentiment(ticker),
-                "errors": state.get("errors", []) + [f"SentimentAgent: {exc}"],
+                "errors": state.get("errors", []) + [make_agent_error("sentiment", exc)],
                 "completed_agents": state.get("completed_agents", []) + ["sentiment"],
             }
 

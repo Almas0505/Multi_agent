@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.agents.base import BaseAgent
+from app.models.errors import make_agent_error
 from app.models.state import FinancialResearchState
 from app.tools.sec_edgar_tool import SECEdgarTool
 from app.tools.yfinance_tool import YFinanceTool
@@ -80,7 +81,7 @@ class FundamentalsAgent(BaseAgent):
             self.logger.error(f"FundamentalsAgent failed for {ticker}: {exc}")
             return {
                 "fundamentals_data": self._mock_fundamentals(ticker),
-                "errors": state.get("errors", []) + [f"FundamentalsAgent: {exc}"],
+                "errors": state.get("errors", []) + [make_agent_error("fundamentals", exc)],
                 "completed_agents": state.get("completed_agents", []) + ["fundamentals"],
             }
 
